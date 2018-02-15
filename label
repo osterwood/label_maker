@@ -1,0 +1,79 @@
+#!/usr/bin/env ruby
+
+require 'combine_pdf'
+require 'prawn'
+require 'barby/barcode/code_128'
+require 'barby/outputter/prawn_outputter'
+
+def print_usage
+  puts
+  puts "Usage: #{__FILE__} CMD OPTS"
+  puts
+  puts "Valid Commands and Options:"
+  puts "  add BARCODE DESCRIPTION"
+  puts "  clear"
+  puts
+
+  exit(0)
+end
+
+DPI  = 72
+XDIM = 1
+
+OUTPUT_FILE = "labels.pdf"
+TEMP_FILE   = "temp.pdf"
+
+if ARGV.empty?
+    print_usage
+end
+
+case ARGV[0]
+when 'add'
+
+  width   = 0.375 # inches
+  length  = 2.5   # inches
+  padding = 2     # pixels
+
+  half = width*DPI/2 # 1/2 vertical height in pixels
+
+  output_file = OUTPUT_FILE
+  output_file = TEMP_FILE if File.exists? OUTPUT_FILE
+
+  Prawn::Document.generate(
+    output_file, page_size: [width*DPI, length*DPI], page_layout: :landscape, margin: padding
+  ) do |doc|
+
+    barcode    = Barby::Code128B.new(ARGV[1])
+    barcode_px = barcode.encoding.length * XDIM + padding*4
+
+    if barcode_px > length * DPI
+      puts "WARN : Barcode length is #{barcode_px} px, longer than label length of #{length * DPI}"
+    end
+
+    # xdim controls pixel width of narrow bars and spaces. Smaller
+    # values will make a denser label, but I've found that my barcode
+    # scanner cannot reliably read codes printed with xdim < 1.
+    #
+    # X provides slight padding to left side of code
+    # Y positions barcode to start at midline of the label, printing upward
+    # Height is less than 'half' to provide some space at the top of the code
+    barcode.annotate_pdf(doc, {height: half-padding*2, x: padding*2, y: half, xdim:XDIM}) 
+
+    doc.bounding_box([padding*2, half - padding], width: length*DPI, height:half) do
+      doc.font("Helvetica", size:10)
+      doc.text ARGV[2..-1].join(" ")
+    end
+  end
+
+  if File.exists? TEMP_FILE
+    pdf  = CombinePDF.new
+    pdf << CombinePDF.load(OUTPUT_FILE) 
+    pdf << CombinePDF.load(TEMP_FILE)
+    pdf.save OUTPUT_FILE
+
+    File.delete TEMP_FILE
+  end
+
+when 'clear'
+  File.delete OUTPUT_FILE if File.exists? OUTPUT_FILE
+end
